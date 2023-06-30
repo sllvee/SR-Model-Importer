@@ -1798,6 +1798,8 @@ def generate_mod_folder(path, character_name, no_ramps, delete_intermediate, cre
                 if component["component_name"] == "Face":
                     j = 0
                     texture = texture_hashes[j]
+                    if not os.path.isfile(os.path.join(path, f"{current_name}{current_object}{texture[0]}.dds")):
+                        texture[1] = ".jpg"
                     ib_override_ini += f"[TextureOverride{current_name}{current_object}{texture[0]}]\nhash = {texture[2]}\n"
                     shutil.copy(os.path.join(path, f"{current_name}{current_object}{texture[0]}{texture[1]}"),
                                 os.path.join(parent_folder, f"{character_name}Mod", f"{current_name}{current_object}{texture[0]}{texture[1]}"))
@@ -1807,6 +1809,8 @@ def generate_mod_folder(path, character_name, no_ramps, delete_intermediate, cre
                     for j, texture in enumerate(texture_hashes):
                         if no_ramps and texture[0] in ["ShadowRamp", "MetalMap", "DiffuseGuide"]:
                             continue
+                        if not os.path.isfile(os.path.join(path, f"{current_name}{current_object}{texture[0]}.dds")):
+                            texture[1] = ".jpg"
                         shutil.copy(os.path.join(path, f"{current_name}{current_object}{texture[0]}{texture[1]}"),
                                     os.path.join(parent_folder, f"{character_name}Mod",f"{current_name}{current_object}{texture[0]}{texture[1]}"))
                         ib_override_ini += f"ps-t{j} = Resource{current_name}{current_object}{texture[0]}\n"
@@ -1837,8 +1841,16 @@ def generate_mod_folder(path, character_name, no_ramps, delete_intermediate, cre
                 vb_override_ini += f"[TextureOverride{current_name}VertexLimitRaise]\nhash = {component['draw_vb']}\n\n"
 
                 vb_res_ini += f"[Resource{current_name}Position]\ntype = Buffer\nstride = 40\nfilename = {current_name}Position.buf\n\n"
-                vb_res_ini += f"[Resource{current_name}Blend]\ntype = Buffer\nstride = 32\nfilename = {current_name}Blend.buf\n\n"
-                vb_res_ini += f"[Resource{current_name}Texcoord]\ntype = Buffer\nstride = {stride - 72}\nfilename = {current_name}Texcoord.buf\n\n"
+                if stride > 72:
+                    vb_res_ini += f"[Resource{current_name}Blend]\ntype = Buffer\nstride = 32\nfilename = {current_name}Blend.buf\n\n"
+                    vb_res_ini += f"[Resource{current_name}Texcoord]\ntype = Buffer\nstride = {stride - 72}\nfilename = {current_name}Texcoord.buf\n\n"
+                elif stride == 56:
+                    vb_res_ini += f"[Resource{current_name}Blend]\ntype = Buffer\nstride = 4\nfilename = {current_name}Blend.buf\n\n"
+                    vb_res_ini += f"[Resource{current_name}Texcoord]\ntype = Buffer\nstride = {stride - 48}\nfilename = {current_name}Texcoord.buf\n\n"
+                else:
+                    vb_res_ini += f"[Resource{current_name}Blend]\ntype = Buffer\nstride = 16\nfilename = {current_name}Blend.buf\n\n"
+                    vb_res_ini += f"[Resource{current_name}Texcoord]\ntype = Buffer\nstride = {stride - 56}\nfilename = {current_name}Texcoord.buf\n\n"
+
             else:
                 with open(os.path.join(parent_folder, f"{character_name}Mod", f"{current_name}.buf"), "wb") as f:
                     f.write(position)
@@ -1946,12 +1958,28 @@ def collect_vb(folder, name, classification, stride):
         data = f.read()
         data = bytearray(data)
         i = 0
-        while i < len(data):
-            import binascii
-            position += data[i:i+40]
-            blend += data[i+40:i+72]
-            texcoord += data[i+72:i+stride]
-            i += stride
+        if stride > 72:
+            while i < len(data):
+                import binascii
+                position += data[i:i+40]
+                blend += data[i+40:i+72]
+                texcoord += data[i+72:i+stride]
+                i += stride
+        elif stride == 56:
+            while i < len(data):
+                import binascii
+                position += data[i:i+40]
+                blend += data[i+44:i+48]
+                texcoord += data[i+48:i+stride]
+                i += stride
+        else:
+            while i < len(data):
+                import binascii
+                position += data[i:i+40]
+                blend += data[i+40:i+56]
+                texcoord += data[i+56:i+stride]
+                i += stride
+
     return position, blend, texcoord
 
 

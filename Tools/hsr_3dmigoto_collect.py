@@ -30,6 +30,9 @@ def main():
 
     character = args.name.replace(" ", "")
     base_classification = ["A", "B", "C", "D"]
+    root_vss = ["9684c4091fc9e35a", "a0b21a8e787c5a98", "e8425f64cfb887cd"]
+
+    root_vss = [x for x in root_vss if args.vs != x]
 
     # Even if user doesn't specify specific framedump, code will now default to the most recent one
     # Frame analysis folders have leading 0s for the date, so default order will be sorted correctly
@@ -108,7 +111,7 @@ def main():
             texcoord_stride = get_stride(os.path.join(frame_dump_folder, texcoord_vbs[i]))
 
             texcoord_filter = ["COLOR:", "TEXCOORD:"]
-            if texcoord_stride == "20":
+            if texcoord_stride in ["20", "12", "8"]:
                 texcoord_filter.append("TEXCOORD1:")
             texcoord_filter = tuple(texcoord_filter)
 
@@ -123,8 +126,16 @@ def main():
                 return
 
             if not args.no_blend and not point_vb_candidates:
-                print("WARNING: Unable to find vbs to use for position information.")
-                return
+                if root_vss:
+                    for vs in root_vss:
+                        point_vbs = collect_pointlist_candidates(frame_dump_folder, vs)
+                        point_vb_candidates = [x for x in point_vbs if point_vbs[x]["vertex_count"] == len(texcoord)]
+                        if point_vb_candidates:
+                            args.vs = vs
+                            break
+                if not point_vb_candidates:
+                    print("WARNING: Unable to find vbs to use for position information by vs.")
+                    return
 
             if args.no_blend or (not args.force_object and not point_vb_candidates):
                 # If we can't find a correct pointlist, fall back to using the positional data from collect_model_data
@@ -483,10 +494,11 @@ def collect_model_data(frame_dump_folder, relevant_ids, force_ids):
             # The original script only used the diffuse and lightmaps, but I have extended to now look for shadow
             #   ramps and metal maps as well
             texture_maps = [name for name in current_id_files if "-ps-t" in name and (
-                        os.path.splitext(name)[1] == ".dds" or os.path.splitext(name)[1] == ".jpg")]
+                        os.path.splitext(name)[1] == ".dds" and "!S!" not in name or os.path.splitext(name)[1] == ".jpg")]
             print(f"Found texture maps: {texture_maps}")
             if len(texture_maps) < 2:
                 print(f"WARNING: Unable to find diffuse and lightmaps for {current_id}")
+                continue
 
             model_group[first_index] = []
             model_group[first_index].append(texture_maps[0])
@@ -562,12 +574,40 @@ def collect_buffer_data(frame_dump_folder, filename, filters):
         element_format = parse_buffer_headers(headers, data, filters)
         group_size = len(element_format)
         data = data.strip().split("\n")
+        BLEND_format = [
+            {
+                'semantic_name': 'BLENDWEIGHTS',
+                'element_name': 'BLENDWEIGHTS',
+                'index': '0',
+                'format': 'R32_FLOAT',
+                'bytewidth': 4
+            }, {
+                'semantic_name': 'BLENDINDICES',
+                'element_name': 'BLENDINDICES',
+                'index': '0',
+                'format': 'R32_UINT',
+                'bytewidth': 4
+            }
+
+        ]
         # The .txt files do not always accurately reflect what is in the raw data, can use this to filter
         temp = []
-        for line in data:
-            for filter in filters:
-                if filter in line:
+        if len(element_format) == 1 and "BLENDINDICES" in element_format[0].values():
+            element_format = BLEND_format
+            group_size = len(element_format)
+            for line in data:
+                if "BLENDINDICES" in line:
+                    BLENDINDICES_line = line.split(":")[0].replace("BLENDINDICES", "BLENDWEIGHTS") + ": 1"
+                    temp.append(BLENDINDICES_line)
+                    line = line.replace("000", str(element_format[0]["bytewidth"]).zfill(3))
                     temp.append(line)
+        else:
+            for line in data:
+                for filter in filters:
+                    if filter in line:
+                        temp.append(line)
+
+
         data = temp
         vertex_group = []
         for i in range(len(data)):
@@ -594,6 +634,7 @@ def collect_buffer_data(frame_dump_folder, filename, filters):
             if (i + 1) % group_size == 0:
                 result.append(vertex_group)
                 vertex_group = []
+
 
     return result, element_format
 
@@ -695,23 +736,23 @@ def output_results(frame_dump_folder, character, component_names, model_data, vb
 
         if has_normalmap:
             shutil.copyfile(os.path.join(frame_dump_folder, model_data[current_part][index][1]),
-                            os.path.join(character, f"{name_prefix}NormalMap.dds"))
+                            os.path.join(character, f"{name_prefix}NormalMap{os.path.splitext(model_data[current_part][index][1])[1]}"))
         else:
             shutil.copyfile(os.path.join(frame_dump_folder, model_data[current_part][index][1]),
-                            os.path.join(character, f"{name_prefix}Diffuse.dds"))
+                            os.path.join(character, f"{name_prefix}Diffuse{os.path.splitext(model_data[current_part][index][1])[1]}"))
         if len(model_data[current_part][index]) > 2:
             if has_normalmap:
                 shutil.copyfile(os.path.join(frame_dump_folder, model_data[current_part][index][2]),
-                                os.path.join(character, f"{name_prefix}Diffuse.dds"))
+                                os.path.join(character, f"{name_prefix}Diffuse{os.path.splitext(model_data[current_part][index][2])[1]}"))
             else:
                 shutil.copyfile(os.path.join(frame_dump_folder, model_data[current_part][index][2]),
-                                os.path.join(character, f"{name_prefix}LightMap.dds"))
+                                os.path.join(character, f"{name_prefix}LightMap{os.path.splitext(model_data[current_part][index][2])[1]}"))
         if len(model_data[current_part][index]) > 3:
             if has_normalmap:
                 texture_hash = ""
                 texture_type = "LightMap"
                 shutil.copyfile(os.path.join(frame_dump_folder, model_data[current_part][index][3]),
-                                os.path.join(character, f"{name_prefix}LightMap.dds"))
+                                os.path.join(character, f"{name_prefix}LightMap{os.path.splitext(model_data[current_part][index][3])[1]}"))
             else:
                 texture_hash = model_data[current_part][index][3].split("-vs=")[0].split("=")[-1]
                 extension, texture_type = identify_texture(frame_dump_folder, model_data[current_part][index][3])
